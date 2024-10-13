@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-export const TranscribingOverlay = () => {
+const TranscribingOverlay = () => {
   const [dots, setDots] = useState("...");
 
   useEffect(() => {
@@ -19,3 +19,5 @@ export const TranscribingOverlay = () => {
     </div>
   );
 };
+
+export default TranscribingOverlay;
