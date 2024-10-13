@@ -539,12 +539,10 @@ app.get('/api/check-users', async (req, res) => {
 app.get('/api/unread-messages', isAuthenticated, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('Fetching unread messages for user:', userId);
-
     const unreadMessages = await Message.aggregate([
       {
         $match: {
-          recipient: mongoose.Types.ObjectId(userId),
+          recipient: new mongoose.Types.ObjectId(userId),
           read: false
         }
       },
@@ -556,18 +554,36 @@ app.get('/api/unread-messages', isAuthenticated, async (req, res) => {
       }
     ]);
 
-    console.log('Unread messages aggregation result:', unreadMessages);
-
     const unreadCounts = {};
     unreadMessages.forEach(item => {
       unreadCounts[item._id.toString()] = item.count;
     });
 
-    console.log('Unread counts:', unreadCounts);
     res.json(unreadCounts);
   } catch (error) {
     console.error('Error fetching unread message counts:', error);
     res.status(500).json({ error: 'An error occurred while fetching unread message counts' });
+  }
+});
+
+app.post('/api/mark-messages-read', isAuthenticated, async (req, res) => {
+  try {
+    const { senderId } = req.body;
+    const recipientId = req.user.id;
+
+    await Message.updateMany(
+      { 
+        sender: new mongoose.Types.ObjectId(senderId),
+        recipient: new mongoose.Types.ObjectId(recipientId),
+        read: false
+      },
+      { $set: { read: true } }
+    );
+
+    res.json({ message: 'Messages marked as read successfully' });
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    res.status(500).json({ error: 'An error occurred while marking messages as read' });
   }
 });
 

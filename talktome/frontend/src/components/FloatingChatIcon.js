@@ -5,7 +5,7 @@ import { useUser } from './UserContext';
 import io from 'socket.io-client';
 
 const FloatingChatIcon = () => {
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState({});
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [connections, setConnections] = useState([]);
   const [selectedConnection, setSelectedConnection] = useState(null);
@@ -24,11 +24,11 @@ const FloatingChatIcon = () => {
         if (selectedConnection && (message.sender === selectedConnection._id || message.recipient === selectedConnection._id)) {
           setMessages(prevMessages => [...prevMessages, message]);
         }
-        fetchUnreadCount();
+        fetchUnreadMessages();
       });
 
       fetchConnections();
-      fetchUnreadCount();
+      fetchUnreadMessages();
 
       return () => newSocket.disconnect();
     }
@@ -55,16 +55,15 @@ const FloatingChatIcon = () => {
     }
   };
 
-  const fetchUnreadCount = async () => {
+  const fetchUnreadMessages = async () => {
     try {
       const response = await axios.get('http://localhost:3001/api/unread-messages', {
         headers: { 'x-session-id': localStorage.getItem('sessionId') }
       });
-      const totalUnread = Object.values(response.data).reduce((a, b) => a + b, 0);
-      setUnreadCount(totalUnread);
+      setUnreadMessages(response.data);
     } catch (error) {
-      console.error('Error fetching unread count:', error);
-      setUnreadCount(0);
+      console.error('Error fetching unread messages:', error);
+      setUnreadMessages({});
     }
   };
 
@@ -74,6 +73,13 @@ const FloatingChatIcon = () => {
         headers: { 'x-session-id': localStorage.getItem('sessionId') }
       });
       setMessages(response.data);
+      // Clear unread messages for this connection
+      setUnreadMessages(prev => ({...prev, [connectionId]: 0}));
+      // Update the backend about read messages
+      await axios.post('http://localhost:3001/api/mark-messages-read', 
+        { senderId: connectionId },
+        { headers: { 'x-session-id': localStorage.getItem('sessionId') } }
+      );
     } catch (error) {
       console.error('Error fetching messages:', error);
     }
@@ -101,13 +107,15 @@ const FloatingChatIcon = () => {
     setIsChatOpen(!isChatOpen);
     if (!isChatOpen) {
       fetchConnections();
-      fetchUnreadCount();
+      fetchUnreadMessages();
     }
   };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  const totalUnreadCount = Object.values(unreadMessages).reduce((a, b) => a + b, 0);
 
   if (!user) {
     return null;
@@ -123,9 +131,9 @@ const FloatingChatIcon = () => {
           <div className="bg-blue-500 text-white rounded-full p-3 shadow-lg hover:bg-blue-600 transition-colors">
             <MessageCircle size={24} />
           </div>
-          {unreadCount > 0 && (
+          {totalUnreadCount > 0 && (
             <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center">
-              {unreadCount}
+              {totalUnreadCount}
             </div>
           )}
         </div>
@@ -142,10 +150,15 @@ const FloatingChatIcon = () => {
                 {connections.map(connection => (
                   <div
                     key={connection._id}
-                    className="cursor-pointer p-3 hover:bg-gray-100 rounded-lg mb-2 transition-colors"
+                    className="cursor-pointer p-3 hover:bg-gray-100 rounded-lg mb-2 transition-colors flex justify-between items-center"
                     onClick={() => setSelectedConnection(connection)}
                   >
-                    {connection.username}
+                    <span>{connection.username}</span>
+                    {unreadMessages[connection._id] > 0 && (
+                      <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1">
+                        {unreadMessages[connection._id]}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
