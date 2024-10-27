@@ -121,5 +121,3 @@ If you encounter any issues or have questions, please file an issue on the GitHu
 ---
 
 Happy language learning with Talk To Me!
-
-test
