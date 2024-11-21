@@ -2,6 +2,11 @@ const express = require('express');
 const multer = require('multer');
 const OpenAI = require('openai');
 const fs = require('fs');
+const uploadsDir = './uploads';
+
+if (!fs.existsSync(uploadsDir)){
+    fs.mkdirSync(uploadsDir);
+}
 const cors = require('cors');
 const path = require('path');
 const bcrypt = require('bcrypt');
@@ -11,6 +16,7 @@ const app = express();
 const mongoose = require('mongoose');
 const http = require('http');
 const socketIo = require('socket.io');
+
 
 mongoose.connect('mongodb://localhost/talktome', { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('Connected to MongoDB'))
@@ -47,7 +53,11 @@ const upload = multer({
 }).single('audio');
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:3000",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -226,16 +236,51 @@ app.post('/api/get-feedback', async (req, res) => {
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
-        { role: "system", content: `You are an expert language tutor for ${language}. Your task is to provide specific, constructive feedback on the following text. Focus on these areas:
+        { 
+          role: "system", 
+          content: `You are an expert language tutor specializing in ${language}. Your task is to analyze the SENTENCE STRUCTURE, GRAMMAR, and VOCABULARY of the following text, ignoring any transcription errors or pronunciation issues. 
 
-        1. Structure: Evaluate the overall organization of ideas and sentences. Comment on coherence and flow.
-        2. Grammar: Identify and explain any grammatical errors. Provide corrections and explanations.
-        3. Vocabulary: Assess the range and appropriateness of vocabulary used. Suggest improvements or alternatives where applicable.
-        4. Tone: Comment on the tone and register of the language. Is it appropriate for the context?
+          Focus ONLY on these areas:
 
-        Provide your feedback in a clear, organized manner. Do not repeat the original text. Instead, offer specific examples and suggestions for improvement. Be encouraging but thorough in your assessment.` },
-        { role: "system", content: `Remember to provide your feedback STRICTLY in ${feedbackLanguage}.` },
-        { role: "user", content: transcript }
+          1. Sentence Structure Analysis:
+             - Evaluate how ideas are connected within sentences
+             - Identify any run-on sentences or fragments
+             - Suggest better ways to combine or separate ideas
+             - Comment on sentence variety and complexity
+
+          2. Grammar Focus:
+             - Identify grammatical patterns that need improvement
+             - Point out incorrect verb tenses or agreement issues
+             - Highlight problems with articles, prepositions, or conjunctions
+             - Provide correct grammatical alternatives
+
+          3. Vocabulary Enhancement:
+             - Suggest more sophisticated or appropriate word choices
+             - Identify overused words and provide alternatives
+             - Point out informal words that could be replaced with formal ones
+             - Recommend idiomatic expressions where appropriate
+
+          Format your feedback as follows:
+          - Sentence Structure: [Your analysis]
+          - Grammar Patterns: [Your analysis]
+          - Vocabulary Suggestions: [Your analysis]
+          - Example Improvements: [Provide 2-3 revised sentences as examples]
+
+          Important:
+          - IGNORE any spelling mistakes or transcription errors
+          - DO NOT comment on pronunciation or accent
+          - Focus ONLY on how ideas are structured and expressed
+          - Be encouraging while providing constructive feedback
+          - Provide specific examples for improvement`
+        },
+        { 
+          role: "system", 
+          content: `Provide your feedback in ${feedbackLanguage}.` 
+        },
+        { 
+          role: "user", 
+          content: transcript 
+        }
       ],
     });
     res.json({ feedback: completion.choices[0].message.content });
@@ -243,7 +288,7 @@ app.post('/api/get-feedback', async (req, res) => {
     console.error('Error:', error);
     res.status(500).json({ error: 'An error occurred while getting feedback' });
   }
-});
+});;
 
 const { exec } = require('child_process');
 const util = require('util');
@@ -399,19 +444,69 @@ const connectionExists = async (studentId, tutorId) => {
 const server = http.createServer(app);
 
 // Initialize Socket.IO
-const io = socketIo(server);
+const io = socketIo(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["my-custom-header"],
+    credentials: true
+  }
+});
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
-  console.log('New client connected');
+  console.log('New client connected:', socket.id);
   
+  // Handle joining a call room
+  socket.on('joinCall', ({ callId, userId }) => {
+    console.log(`User ${userId} joining call room ${callId}`);
+    socket.join(callId);
+    io.to(callId).emit('userJoined', { userId });
+  });
+
+  // Handle leaving a call room
+  socket.on('leaveCall', ({ callId, userId }) => {
+    console.log(`User ${userId} leaving call room ${callId}`);
+    socket.leave(callId);
+    io.to(callId).emit('userLeft', { userId });
+  });
+
+  // Handle call signals (for WebRTC)
+  socket.on('callSignal', ({ callId, signal, userId }) => {
+    console.log(`Received call signal from ${userId} in room ${callId}`);
+    io.to(callId).emit('callSignal', { signal, userId });
+  });
+
+  // Handle messaging during call
+  socket.on('callMessage', ({ callId, message, userId }) => {
+    console.log(`Message in call ${callId} from ${userId}: ${message}`);
+    io.to(callId).emit('callMessage', { message, userId });
+  });
+
+  // Handle general user presence
   socket.on('join', (userId) => {
+    console.log(`User ${userId} joined general room`);
     socket.join(userId);
+    io.emit('userOnline', userId);
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected');
+    console.log('Client disconnected:', socket.id);
+    io.emit('userOffline', socket.id);
   });
+
+  // Handle connection errors
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+  });
+});
+
+// Add error handling for the Socket.IO server
+io.engine.on("connection_error", (err) => {
+  console.log('Connection error:', err.req);
+  console.log('Error code:', err.code);
+  console.log('Error message:', err.message);
+  console.log('Error context:', err.context);
 });
 
 // New API endpoints
@@ -456,18 +551,32 @@ app.post('/api/connect', isAuthenticated, async (req, res) => {
   }
 });
 
+// In server.js, modify the connections endpoint
 app.get('/api/connections', isAuthenticated, async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
       .populate('tutors', 'username email teachingLanguages')
       .populate('students', 'username email learningLanguages');
 
-    const connections = {
-      tutors: user.tutors,
-      students: user.students
-    };
+    // Return just the tutors array if the user is a student
+    if (user.role === 'student') {
+      return res.json(user.tutors || []);
+    }
+    
+    // Return just the students array if the user is a tutor
+    if (user.role === 'tutor') {
+      return res.json(user.students || []);
+    }
 
-    res.json(connections);
+    // For users with role 'both', return both arrays
+    if (user.role === 'both') {
+      return res.json({
+        tutors: user.tutors || [],
+        students: user.students || []
+      });
+    }
+
+    return res.json([]);
   } catch (error) {
     console.error('Error in /api/connections:', error);
     res.status(500).json({ error: 'An error occurred while fetching connections' });
@@ -587,6 +696,105 @@ app.post('/api/mark-messages-read', isAuthenticated, async (req, res) => {
   }
 });
 
+const BookingSchema = new mongoose.Schema({
+  studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  tutorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  date: { type: Date, required: true },
+  time: { type: String, required: true },
+  language: { type: String, required: true },
+  status: { type: String, enum: ['scheduled', 'completed', 'cancelled'], default: 'scheduled' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Booking = mongoose.model('Booking', BookingSchema);
+
+// Booking endpoints
+app.post('/api/bookings', isAuthenticated, async (req, res) => {
+  try {
+    const { tutorId, date, time, language } = req.body;
+    const studentId = req.user.id;
+
+    // Check if slot is available
+    const existingBooking = await Booking.findOne({
+      tutorId,
+      date,
+      time,
+      status: 'scheduled'
+    });
+
+    if (existingBooking) {
+      return res.status(400).json({ error: 'This time slot is already booked' });
+    }
+
+    const booking = new Booking({
+      studentId,
+      tutorId,
+      date,
+      time,
+      language
+    });
+
+    await booking.save();
+
+    // Could add notification/email to tutor here
+
+    res.status(201).json(booking);
+  } catch (error) {
+    console.error('Booking error:', error);
+    res.status(500).json({ error: 'Failed to create booking' });
+  }
+});
+
+app.get('/api/bookings', isAuthenticated, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    let query;
+    if (userRole === 'student') {
+      query = { studentId: userId };
+    } else if (userRole === 'tutor') {
+      query = { tutorId: userId };
+    } else {
+      query = { $or: [{ studentId: userId }, { tutorId: userId }] };
+    }
+
+    const bookings = await Booking.find(query)
+      .populate('tutorId', 'username')
+      .populate('studentId', 'username')
+      .sort({ date: 1, time: 1 });
+
+    res.json(bookings);
+  } catch (error) {
+    console.error('Error fetching bookings:', error);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+app.put('/api/bookings/:id', isAuthenticated, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const booking = await Booking.findByIdAndUpdate(
+      id,
+      { status },
+      { new: true }
+    );
+
+    res.json(booking);
+  } catch (error) {
+    console.error('Error updating booking:', error);
+    res.status(500).json({ error: 'Failed to update booking' });
+  }
+});
+
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Socket.IO server is ready for connections`);
+});
+
+// Make sure you export your server (add this at the end)
+module.exports = { app, server, io };

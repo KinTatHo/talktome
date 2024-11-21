@@ -1,8 +1,8 @@
-# Talk To Me: AI-Powered Language Learning App
+# LinguaMates: AI-Powered Language Learning App
 
 ## Overview
 
-Talk To Me is an innovative language learning application that leverages AI technology to provide real-time speech recognition, transcription, and personalized feedback. It's designed to help users practice and improve their language skills through interactive speaking exercises and AI-driven tutoring.
+LinguaMates is an innovative language learning application that leverages AI technology to provide real-time speech recognition, transcription, and personalized feedback. It's designed to help users practice and improve their language skills through interactive speaking exercises and AI-driven tutoring.
 
 ## Features
 
@@ -120,4 +120,4 @@ If you encounter any issues or have questions, please file an issue on the GitHu
 
 ---
 
-Happy language learning with Talk To Me!
+Happy language learning with LinguaMates!
